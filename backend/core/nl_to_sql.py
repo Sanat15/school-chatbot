@@ -14,18 +14,26 @@ def get_db_chain():
     return chain, db
 
 def clean_sql(raw: str) -> str:
-    # If LLM returns "SQLQuery: SELECT ..." extract just the SQL
     if "SQLQuery:" in raw:
         raw = raw.split("SQLQuery:")[-1]
-    # Remove markdown code blocks
     raw = re.sub(r"```sql|```", "", raw)
-    # Remove any "Question: ..." line at the start
     lines = [l for l in raw.strip().splitlines() if not l.strip().lower().startswith("question:")]
     return "\n".join(lines).strip()
 
-def run_nl_query(question: str):
+def generate_response(question: str, result: str, username: str) -> str:
+    llm = get_llm()
+    prompt = f"""You are a helpful school assistant chatbot.
+A user named {username} asked: "{question}"
+The database returned this result: {result}
+Write a friendly, conversational response in 1-2 sentences using this data.
+Do not mention SQL or databases. Just answer naturally."""
+    response = llm.invoke(prompt)
+    return response.content
+
+def run_nl_query(question: str, username: str = "Student"):
     chain, db = get_db_chain()
     raw = chain.invoke({"question": question})
     sql_query = clean_sql(raw)
     result = db.run(sql_query)
-    return {"query": sql_query, "result": result}
+    response = generate_response(question, result, username)
+    return {"query": sql_query, "raw_result": result, "response": response}

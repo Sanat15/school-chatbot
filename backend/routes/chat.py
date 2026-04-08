@@ -10,5 +10,15 @@ class QueryRequest(BaseModel):
 
 @router.post("/query")
 def chat_query(request: QueryRequest, current_user: dict = Depends(get_current_user)):
-    result = run_nl_query(request.question)
+    user = current_user["user"]
+    role = current_user["role"]
+    username = user.name
+
+    # Inject context into the question so LLM only fetches relevant data
+    if role == "student":
+        enriched_question = f"{request.question} (Only return data for student named '{user.name}' in class_id {user.class_id})"
+    else:
+        enriched_question = f"{request.question} (Only return data for parent named '{user.name}')"
+
+    result = run_nl_query(enriched_question, username)
     return result
