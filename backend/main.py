@@ -44,6 +44,9 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/", tags=["Health"])
-def root():
-    return {"message": "School Chatbot API is running"}
+# Serve the React SPA for all non-API paths (production only — on Vercel the
+# build command copies frontend/dist into api/static/).
+_static_dir = os.path.join(os.path.dirname(__file__), "../static")
+if os.path.isdir(_static_dir):
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")

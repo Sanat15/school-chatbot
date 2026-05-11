@@ -1,10 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "rm -rf api/backend && cp -r backend api/backend && cd frontend && npm install && npm run build",
-  "outputDirectory": "frontend/dist",
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/api/(.*)", "dest": "/api/index.py" },
-    { "src": "/(.*)", "dest": "/index.html" }
+  "buildCommand": "rm -rf api/backend api/static && cp -r backend api/backend && cd frontend && npm install && npm run build && cp -r dist ../api/static",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index.py" }
   ]
 }

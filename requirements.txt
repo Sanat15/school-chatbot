@@ -11,4 +11,5 @@ python-dotenv
 python-multipart
 pydantic
 starlette
+aiofiles
 httpx
