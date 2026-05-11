@@ -10,13 +10,6 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    # Warm up the NL-to-SQL singleton at startup to eliminate first-request cold start.
-    try:
-        from backend.core.nl_to_sql import _get_chain
-        _get_chain()
-        logging.getLogger(__name__).info("NL-to-SQL chain ready")
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Chain warmup failed (non-fatal): %s", exc)
     yield
 
 

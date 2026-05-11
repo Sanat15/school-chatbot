@@ -1,10 +1,10 @@
-from langchain.chains import create_sql_query_chain
-from langchain_community.utilities import SQLDatabase
-from backend.core.llm import get_llm
+from groq import Groq
+from sqlalchemy import text
+from backend.core.database import engine
 from backend.core.language import detect_language
 from fastapi import HTTPException
 from dotenv import load_dotenv
-from typing import Any, Optional
+from functools import lru_cache
 import logging
 import re
 import os
@@ -12,62 +12,89 @@ import os
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Singletons — created once at first request, reused for all subsequent ones.
-_sql_db: Optional[SQLDatabase] = None
-_chain: Any = None
+_SCHEMA = """
+Tables in the PostgreSQL database:
+- classes(id, name)
+- students(id, name, class_id, username, hashed_password)
+- parents(id, name, username, hashed_password)
+- parent_student(id, parent_id, student_id)
+- timetable(id, class_id, day, subject, time_slot)
+- assignments(id, class_id, subject, description, due_date)
+- marks(id, student_id, subject, marks_obtained, total_marks, exam_type)
+"""
 
 
-def _get_chain():
-    global _sql_db, _chain
-    if _sql_db is None:
-        _sql_db = SQLDatabase.from_uri(os.getenv("DATABASE_URL", ""))
-        _chain = create_sql_query_chain(get_llm(), _sql_db)
-    return _chain, _sql_db
+@lru_cache(maxsize=1)
+def _client() -> Groq:
+    return Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 
-def clean_sql(raw: str) -> str:
-    if "SQLQuery:" in raw:
-        raw = raw.split("SQLQuery:")[-1]
-    raw = re.sub(r"```sql|```", "", raw)
-    stop_prefixes = ("question:", "let's", "note:", "this query", "the above")
-    lines = []
-    for line in raw.strip().splitlines():
-        if line.strip().lower().startswith(stop_prefixes):
-            break
-        lines.append(line)
-    result = "\n".join(lines).strip()
-    if ";" in result:
-        result = result[: result.rfind(";") + 1]
-    return result
-
-
-def generate_response(question: str, result: str, username: str) -> str:
-    lang = detect_language(question)
-    prompt = (
-        f"You are a helpful school assistant chatbot.\n"
-        f"A user named {username} asked: \"{question}\"\n"
-        f"The database returned this result: {result}\n"
-        f"Write a friendly, conversational response in 1-2 sentences using this data.\n"
-        f"IMPORTANT: Respond in {lang} language only.\n"
-        f"Do not mention SQL or databases. Just answer naturally."
+def _chat(messages: list) -> str:
+    return (
+        _client()
+        .chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0,
+        )
+        .choices[0]
+        .message.content
     )
-    return str(get_llm().invoke(prompt).content)  # type: ignore[union-attr]
+
+
+def _generate_sql(question: str) -> str:
+    raw = _chat([
+        {
+            "role": "system",
+            "content": (
+                "You are a SQL expert. Given a question, write a single PostgreSQL SELECT query.\n"
+                "Output ONLY the SQL query — no explanation, no markdown, no backticks.\n\n"
+                f"Schema:\n{_SCHEMA}"
+            ),
+        },
+        {"role": "user", "content": question},
+    ])
+    return re.sub(r"```sql|```", "", raw).strip()
+
+
+def _generate_response(question: str, result: str, username: str) -> str:
+    lang = detect_language(question)
+    return _chat([
+        {
+            "role": "system",
+            "content": (
+                f"You are a helpful school assistant chatbot. "
+                f"Answer naturally in {lang}. Never mention SQL or databases."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"User {username} asked: {question}\n"
+                f"Database result: {result}\n"
+                f"Give a friendly 1-2 sentence answer."
+            ),
+        },
+    ])
 
 
 def run_nl_query(question: str, username: str = "Student") -> dict:
     try:
-        chain, db = _get_chain()
-        raw = chain.invoke({"question": question})
-        sql_query = clean_sql(raw)
-        if not sql_query:
-            raise ValueError("Generated SQL is empty")
-        result = db.run(sql_query)
-        response = generate_response(question, str(result), username)
-        return {"query": sql_query, "raw_result": result, "response": response}
+        sql = _generate_sql(question)
+        if not sql.upper().lstrip().startswith("SELECT"):
+            raise ValueError(f"Non-SELECT query generated: {sql[:80]}")
+
+        with engine.connect() as conn:
+            rows = conn.execute(text(sql)).fetchall()
+            result = str([dict(row._mapping) for row in rows])
+
+        response = _generate_response(question, result, username)
+        return {"query": sql, "raw_result": result, "response": response}
+
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("nl_query failed for user=%s: %s", username, exc)
+        logger.error("nl_query failed user=%s: %s", username, exc)
         raise HTTPException(
             status_code=500,
             detail="Could not process your question. Please try rephrasing.",
