@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.routes import timetable, assignments, marks, auth, chat
 import logging
+import os
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,9 +22,18 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="School Chatbot API", version="1.0.0", lifespan=lifespan)
 
+_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+# Allow the deployed Vercel domain if set via env var (e.g. https://school-chatbot.vercel.app)
+if _frontend_url := os.getenv("FRONTEND_URL"):
+    _ALLOWED_ORIGINS.append(_frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
