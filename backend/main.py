@@ -39,14 +39,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(timetable.router)
-app.include_router(assignments.router)
-app.include_router(marks.router)
-app.include_router(chat.router)
+app.include_router(auth.router, prefix="/api")
+app.include_router(timetable.router, prefix="/api")
+app.include_router(assignments.router, prefix="/api")
+app.include_router(marks.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
 
 
-@app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
 def health():
     return {"status": "ok"}
 
